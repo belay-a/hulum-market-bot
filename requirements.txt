@@ -1,0 +1,4 @@
+aiogram
+supabase
+httpx
+python-dotenv
