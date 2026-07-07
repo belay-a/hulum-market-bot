@@ -74,8 +74,8 @@ class BuyerFilter(StatesGroup):
     kebele = State()
 
 class EditProfile(StatesGroup):
-    # 🆕 ሙሉ አድራሻ ማስተካከያ
     merchant_name = State()
+    phone = State()  # 🆕 አዲስ ስቴት
     region = State()
     zone = State()
     woreda = State()
@@ -149,6 +149,12 @@ async def add_start(message: types.Message, state: FSMContext):
 @dp.message(Registration.merchant_name)
 async def reg_name(message: types.Message, state: FSMContext):
     await state.update_data(merchant_name=message.text)
+    await state.set_state(Registration.phone) # ቀጣይ ስልክ ቁጥር
+    await message.answer("ስልክ ቁጥርዎን ያስገቡ:")
+
+@dp.message(Registration.phone) # 🆕 ስልክ ቁጥር መቀበያ
+async def reg_phone(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
     await state.set_state(Registration.region)
     await message.answer("ክልልዎን ይጻፉ፦")
 
@@ -176,6 +182,7 @@ async def reg_kebele(message: types.Message, state: FSMContext):
     merchant_data = {
         "id": message.from_user.id,
         "merchant_name": data['merchant_name'],
+        "phone": data['phone'],        # 🆕 ስልክ ቁጥር ከዳታ ተወሰደ
         "region": data['region'],
         "zone": data['zone'],
         "woreda": data['woreda'],
@@ -188,7 +195,7 @@ async def reg_kebele(message: types.Message, state: FSMContext):
         await message.answer("🎉 ምዝገባዎ ተጠናቋል! አሁን የሚሸጡትን የዕቃ ዘርፍ ከታች ይምረጡ፦", reply_markup=get_categories_kb())
     except Exception as e:
         await message.answer("❌ መረጃዎን መመዝገብ አልተቻለም!", reply_markup=kb)
-
+        await state.clear()
 @dp.message(ProductForm.category)
 async def prod_category(message: types.Message, state: FSMContext):
     if message.text not in CATEGORIES:
@@ -227,7 +234,7 @@ async def prod_photo(message: types.Message, state: FSMContext):
         "merchant_id": merchant_id,
         "category": data['category'],
         "product_name": data['product_name'],
-        "description": data['description'], # 🆕 ማብራሪያ ዳታቤዝ ላይ ይገባል
+        "description": data['description'], 
         "price": data['price'],
         "image_url": photo_id
     }
@@ -235,11 +242,24 @@ async def prod_photo(message: types.Message, state: FSMContext):
         supabase.table("products").insert(product_data).execute()
         await message.answer("✅ ዕቃዎ በተሳካ ሁኔታ ተመዝግቧል።", reply_markup=kb)
         
+        # የነጋዴውን መረጃ ከስልክ ቁጥሩ ጋር መሳብ
         m_res = supabase.table("merchants").select("*").eq("id", merchant_id).execute()
+        
         if m_res.data and m_res.data[0].get('is_paid'):
             m = m_res.data[0]
             desc = data['description']
-            caption = f"🆕 አዲስ ዕቃ ተጨመረ!\n\n🏷 ዘርፍ: {data['category']}\n📦 ምርት: {data['product_name']}\n📝 መግለጫ: {desc}\n💰 ዋጋ: {data['price']} ብር\n📍 አድራሻ: {m['region']}፣ {m['zone']}\n🏢 ሱቅ: {m['merchant_name']}"
+            phone = m.get('phone', 'ስልክ አልተመዘገበም') # 🆕 ስልኩን ከዳታቤዝ መውሰድ
+            
+            caption = (
+                f"🆕 አዲስ ዕቃ ተጨመረ!\n\n"
+                f"🏷 ዘርፍ: {data['category']}\n"
+                f"📦 ምርት: {data['product_name']}\n"
+                f"📝 መግለጫ: {desc}\n"
+                f"💰 ዋጋ: {data['price']} ብር\n"
+                f"📞 ስልክ: {phone}\n" # 🆕 ስልክ ቁጥር እዚህ ተጨመረ
+                f"📍 አድራሻ: {m['region']}፣ {m['zone']}\n"
+                f"🏢 ሱቅ: {m['merchant_name']}"
+            )
             await bot.send_photo(chat_id=CHANNEL_ID, photo=photo_id, caption=caption)
             
         await state.clear()
@@ -247,7 +267,7 @@ async def prod_photo(message: types.Message, state: FSMContext):
         await message.answer("❌ ዕቃውን መመዝገብ አልተቻለም!", reply_markup=kb)
 
 # ==========================================
-# 7. ፕሮፋይል ማስተካከያ (ሙሉ አድራሻ)
+# 7. ፕሮፋይል ማስተካከያ (ሙሉ አድራሻ እና ስልክ)
 # ==========================================
 @dp.message(F.text == "ፕሮፋይል ማስተካከያ")
 async def edit_profile_start(message: types.Message, state: FSMContext):
@@ -261,6 +281,7 @@ async def edit_profile_start(message: types.Message, state: FSMContext):
         # ያሉትን መረጃዎች state ላይ እናስቀምጣለን
         await state.update_data(
             cur_name=user_data['merchant_name'],
+            cur_phone=user_data.get('phone', 'N/A'), # 🆕 ስልክ ቁጥር ተያዘ
             cur_reg=user_data['region'],
             cur_zone=user_data['zone'],
             cur_wor=user_data['woreda'],
@@ -281,6 +302,15 @@ async def edit_prof_name(message: types.Message, state: FSMContext):
     data = await state.get_data()
     new_name = message.text if message.text != "." else data['cur_name']
     await state.update_data(merchant_name=new_name)
+    
+    await state.set_state(EditProfile.phone) # 🆕 ወደ ስልክ ስቴት
+    await message.answer(f"የአሁኑ ስልክ: **{data['cur_phone']}**\nአዲሱን ስልክ ቁጥር ይጻፉ (ለማለፍ `.` ይላኩ)፦", parse_mode="Markdown")
+
+@dp.message(EditProfile.phone)
+async def edit_prof_phone(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    new_phone = message.text if message.text != "." else data['cur_phone']
+    await state.update_data(phone=new_phone)
     
     await state.set_state(EditProfile.region)
     await message.answer(f"የአሁኑ ክልል: **{data['cur_reg']}**\nአዲሱን ክልል ይጻፉ (ለማለፍ `.` ይላኩ)፦", parse_mode="Markdown")
@@ -319,6 +349,7 @@ async def edit_prof_kebele(message: types.Message, state: FSMContext):
     
     update_data = {
         "merchant_name": data['merchant_name'],
+        "phone": data['phone'], # 🆕 አዲሱ ስልክ ቁጥር
         "region": data['region'],
         "zone": data['zone'],
         "woreda": data['woreda'],
@@ -327,76 +358,63 @@ async def edit_prof_kebele(message: types.Message, state: FSMContext):
     
     try:
         supabase.table("merchants").update(update_data).eq("id", message.from_user.id).execute()
-        await message.answer("✅ ፕሮፋይልዎ እና አድራሻዎ በተሳካ ሁኔታ ተስተካክሏል!", reply_markup=kb)
+        await message.answer("✅ ፕሮፋይልዎ፣ ስልክ ቁጥርዎ እና አድራሻዎ በተሳካ ሁኔታ ተስተካክሏል!", reply_markup=kb)
     except Exception as e:
         await message.answer("❌ ማስተካከል አልተሳካም።", reply_markup=kb)
     await state.clear()
-
 # ==========================================
-# 8. በአድራሻ እና በዘርፍ መፈለጊያ (ለገዥዎች)
-# ==========================================
-@dp.message(F.text == "በአድራሻ ፈልግ")
-async def filter_start(message: types.Message, state: FSMContext):
-    await state.set_state(BuyerFilter.category)
-    await message.answer("የሚፈልጉትን የዕቃ ዘርፍ ከታች ይምረጡ፦", reply_markup=get_categories_kb())
-
-@dp.message(BuyerFilter.category)
-async def filter_category(message: types.Message, state: FSMContext):
-    if message.text not in CATEGORIES:
-        await message.answer("እባክዎ ዘርፉን ከታች ከቀረቡት አዝራሮች በመጫን ብቻ ይምረጡ!")
-        return
-    await state.update_data(category=message.text)
-    await state.set_state(BuyerFilter.region)
-    await message.answer("የሚፈልጉትን ዕቃ ለማግኘት እባክዎ ክልል ይጻፉ (ለምሳሌ: አዲስ አበባ, አማራ...)፦", reply_markup=ReplyKeyboardRemove())
-
-@dp.message(BuyerFilter.region)
-async def filter_region(message: types.Message, state: FSMContext):
-    await state.update_data(region=message.text)
-    await state.set_state(BuyerFilter.zone)
-    await message.answer("ዞን (ወይም ክ/ከተማ) ይጻፉ፦")
-
-@dp.message(BuyerFilter.zone)
-async def filter_zone(message: types.Message, state: FSMContext):
-    await state.update_data(zone=message.text)
-    await state.set_state(BuyerFilter.woreda)
-    await message.answer("ወረዳ ይጻፉ፦")
-
-@dp.message(BuyerFilter.woreda)
+#@dp.message(BuyerFilter.woreda)
 async def filter_woreda(message: types.Message, state: FSMContext):
-    await state.update_data(woreda=message.text)
-    await state.set_state(BuyerFilter.kebele)
-    await message.answer("ቀበሌ ወይም ሰፈር ይጻፉ፦")
-
-@dp.message(BuyerFilter.kebele)
-async def filter_kebele(message: types.Message, state: FSMContext):
-    kebele = message.text
+    woreda = message.text
     data = await state.get_data()
     selected_category = data['category']
     
     try:
-        merchants_res = supabase.table("merchants").select("*").ilike("region", f"%{data['region']}%").ilike("zone", f"%{data['zone']}%").ilike("woreda", f"%{data['woreda']}%").ilike("kebele", f"%{kebele}%").execute()
+        # 1. በወረዳ የተመዘገቡ ነጋዴዎችን መፈለግ
+        merchants_res = supabase.table("merchants").select("*").ilike("woreda", f"%{woreda}%").execute()
         
         if not merchants_res.data:
-            await message.answer(f"❌ በዚህ አድራሻ የተመዘገበ ነጋዴ የለም።", reply_markup=kb)
+            await message.answer(f"❌ በወረዳ '{woreda}' የተመዘገበ ነጋዴ የለም።", reply_markup=kb)
             await state.clear()
             return
             
         merchant_ids = [m['id'] for m in merchants_res.data]
+        
+        # 2. የእነዚህ ነጋዴዎች ምርቶች በዘርፍ መፈለግ
         products_res = supabase.table("products").select("*").in_("merchant_id", merchant_ids).eq("category", selected_category).execute()
         
         if not products_res.data:
-            await message.answer(f"❌ በዚህ አድራሻ ላይ የ **{selected_category}** ዘርፍ ዕቃ አልተገኘም።", reply_markup=kb)
+            await message.answer(f"❌ በዚህ ወረዳ የ **{selected_category}** ዘርፍ ዕቃ አልተገኘም።", reply_markup=kb)
             await state.clear()
             return
             
         merchants_dict = {m['id']: m for m in merchants_res.data}
-        await message.answer(f"✅ አድራሻውን እና የዕቃ ዘርፉን ያሟሉ {len(products_res.data)} ዕቃዎች ተገኝተዋል፡", reply_markup=kb)
+        await message.answer(f"✅ {len(products_res.data)} ዕቃዎች ተገኝተዋል፡", reply_markup=kb)
         
+        # 3. ዕቃዎችን ከነ ሙሉ ፕሮፋይላቸው ማሳየት
         for item in products_res.data:
             m = merchants_dict.get(item['merchant_id'])
+            
+            # የነጋዴውን ሙሉ ፕሮፋይል መረጃ ማዘጋጀት
+            merchant_name = m.get('merchant_name', 'ያልታወቀ')
+            phone = m.get('phone', 'ስልክ ቁጥር የለም')
+            region = m.get('region', 'ያልተገለጸ')
+            zone = m.get('zone', 'ያልተገለጸ')
+            woreda_val = m.get('woreda', 'ያልተገለጸ')
+            kebele = m.get('kebele', 'ያልተገለጸ')
+            
             desc = item.get('description', '')
             desc_text = f"\n📝 መግለጫ: {desc}" if desc else ""
-            caption = f"🏷 ዘርፍ: {item.get('category', '')}\n📦 ምርት: {item['product_name']}{desc_text}\n💰 ዋጋ: {item['price']} ብር\n📍 አድራሻ: {m['region']}፣ {m['zone']}\n🏢 ሱቅ: {m['merchant_name']}"
+            
+            # ሙሉ ፕሮፋይል እና የዕቃ መረጃን የያዘ caption
+            caption = (
+                f"🏷 ዘርፍ: {item.get('category', '')}\n"
+                f"📦 ምርት: {item['product_name']}{desc_text}\n"
+                f"💰 ዋጋ: {item['price']} ብር\n\n"
+                f"👤 ነጋዴው: {merchant_name}\n"
+                f"📞 ስልክ: {phone}\n"
+                f"📍 አድራሻ: {region}፣ {zone}፣ {woreda_val}፣ {kebele}"
+            )
             await message.answer_photo(photo=item['image_url'], caption=caption)
             
     except Exception as e:
